@@ -3,59 +3,195 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>SHARP Splat Viewer</title>
+<title>The Chamber</title>
 <style>
   html, body { margin: 0; padding: 0; overflow: hidden; background: #000; color: #fff;
                font-family: -apple-system, system-ui, sans-serif; }
   #renderCanvas { width: 100vw; height: 100vh; display: block; outline: none; touch-action: none; }
   #status { position: fixed; left: 12px; top: 12px; padding: 8px 12px;
-            background: rgba(0,0,0,0.6); border-radius: 6px; font-size: 14px; pointer-events: none; }
-  #vrbtn { position: fixed; right: 12px; bottom: 12px; padding: 12px 20px;
+            background: rgba(0,0,0,0.6); border-radius: 6px; font-size: 14px;
+            pointer-events: none; transition: opacity 0.5s; }
+  #vrbtn { position: fixed; right: 12px; bottom: 12px; padding: 14px 24px;
            background: #3b82f6; color: #fff; border: 0; border-radius: 8px;
            font-size: 16px; cursor: pointer; }
   #vrbtn:disabled { background: #555; cursor: not-allowed; }
+
+  /* Tune-mode UI (hidden by default) */
+  #tune-panel {
+    position: fixed; right: 12px; top: 12px; width: 280px;
+    background: rgba(0,0,0,0.85); border-radius: 8px; padding: 16px;
+    font-size: 13px; max-height: calc(100vh - 100px); overflow-y: auto;
+  }
+  #tune-panel.hidden { display: none; }
+  #tune-panel h3 { margin: 0 0 12px; font-size: 14px; color: #8cf; }
+  #tune-panel label { display: block; margin: 10px 0 4px; }
+  #tune-panel .val { color: #8cf; font-family: monospace; float: right; }
+  #tune-panel input[type=range] { width: 100%; }
+  #tune-panel .actions { margin-top: 14px; display: flex; gap: 8px; }
+  #tune-panel button { flex: 1; padding: 8px; background: #444; border: 0;
+                       color: #fff; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  #tune-panel button:hover { background: #666; }
+  #tune-panel pre { margin-top: 12px; padding: 8px; background: #000; border-radius: 4px;
+                    font-size: 11px; white-space: pre-wrap; word-break: break-all;
+                    color: #8f8; }
 </style>
 <script src="https://cdn.babylonjs.com/babylon.js"></script>
 <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
 <body>
 <canvas id="renderCanvas"></canvas>
-<div id="status">Loading splat...</div>
+<div id="status">Loading...</div>
 <button id="vrbtn" disabled>Enter VR</button>
+
+<div id="tune-panel" class="hidden">
+  <h3>TUNE MODE</h3>
+  <label>Position X <span class="val" id="px-v">0.00</span></label>
+  <input type="range" id="px" min="-3" max="3" step="0.01">
+  <label>Position Y <span class="val" id="py-v">0.00</span></label>
+  <input type="range" id="py" min="-1" max="3" step="0.01">
+  <label>Position Z <span class="val" id="pz-v">0.00</span></label>
+  <input type="range" id="pz" min="-3" max="3" step="0.01">
+  <label>Rotation X <span class="val" id="rx-v">0.00</span></label>
+  <input type="range" id="rx" min="-3.14159" max="3.14159" step="0.01">
+  <label>Rotation Y <span class="val" id="ry-v">0.00</span></label>
+  <input type="range" id="ry" min="-3.14159" max="3.14159" step="0.01">
+  <label>Rotation Z <span class="val" id="rz-v">0.00</span></label>
+  <input type="range" id="rz" min="-3.14159" max="3.14159" step="0.01">
+  <label>Scale <span class="val" id="sc-v">1.00</span></label>
+  <input type="range" id="sc" min="0.1" max="3" step="0.01">
+  <div class="actions">
+    <button id="reset">Reset</button>
+    <button id="copy">Copy</button>
+  </div>
+  <pre id="values-display"></pre>
+</div>
+
 <script>
+// =====================================================
+// BAKED TRANSFORM (edit after tuning to deploy)
+// =====================================================
+const DEFAULT_TRANSFORM = {
+  posX: 0.00,
+  posY: 1.00,
+  posZ: 1.50,
+  rotX: 0.00,
+  rotY: 0.00,
+  rotZ: 0.00,
+  scale: 1.00,
+};
+// =====================================================
+
+const TUNE_MODE = new URLSearchParams(location.search).get('tune') === '1';
+const TRANSFORM = { ...DEFAULT_TRANSFORM };
+
+// In tune mode, restore last-saved values from localStorage so the user
+// can iterate across sessions.
+if (TUNE_MODE) {
+  try {
+    const saved = JSON.parse(localStorage.getItem('chamberTransform') || 'null');
+    if (saved) Object.assign(TRANSFORM, saved);
+  } catch (e) {}
+}
+
 const status = document.getElementById("status");
 const vrbtn = document.getElementById("vrbtn");
 const canvas = document.getElementById("renderCanvas");
+const tunePanel = document.getElementById("tune-panel");
 const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+
+let splat = null;
+
+function applyTransform() {
+  if (!splat) return;
+  splat.position.set(TRANSFORM.posX, TRANSFORM.posY, TRANSFORM.posZ);
+  splat.rotation.set(TRANSFORM.rotX, TRANSFORM.rotY, TRANSFORM.rotZ);
+  splat.scaling.set(TRANSFORM.scale, TRANSFORM.scale, TRANSFORM.scale);
+}
+
+function setupTuneUI() {
+  tunePanel.classList.remove("hidden");
+
+  const fields = [
+    ['px', 'posX'], ['py', 'posY'], ['pz', 'posZ'],
+    ['rx', 'rotX'], ['ry', 'rotY'], ['rz', 'rotZ'],
+    ['sc', 'scale'],
+  ];
+
+  function renderUI() {
+    for (const [id, key] of fields) {
+      document.getElementById(id).value = TRANSFORM[key];
+      document.getElementById(id + '-v').textContent = TRANSFORM[key].toFixed(2);
+    }
+    const out = Object.entries(TRANSFORM)
+      .map(([k, v]) => `  ${k}: ${v.toFixed(2)},`).join('\n');
+    document.getElementById('values-display').textContent = '{\n' + out + '\n}';
+  }
+
+  for (const [id, key] of fields) {
+    document.getElementById(id).addEventListener('input', (e) => {
+      TRANSFORM[key] = parseFloat(e.target.value);
+      applyTransform();
+      renderUI();
+      try { localStorage.setItem('chamberTransform', JSON.stringify(TRANSFORM)); } catch (e) {}
+    });
+  }
+
+  document.getElementById('reset').addEventListener('click', () => {
+    Object.assign(TRANSFORM, DEFAULT_TRANSFORM);
+    applyTransform();
+    renderUI();
+    try { localStorage.setItem('chamberTransform', JSON.stringify(TRANSFORM)); } catch (e) {}
+  });
+
+  document.getElementById('copy').addEventListener('click', () => {
+    const text = Object.entries(TRANSFORM)
+      .map(([k, v]) => `  ${k}: ${v.toFixed(2)},`).join('\n');
+    navigator.clipboard.writeText('{\n' + text + '\n}').then(() => {
+      status.textContent = "Values copied to clipboard";
+    }, () => {
+      status.textContent = "(clipboard blocked, copy from panel)";
+    });
+  });
+
+  renderUI();
+}
 
 async function createScene() {
   const scene = new BABYLON.Scene(engine);
   scene.clearColor = new BABYLON.Color4(0, 0, 0, 1);
 
-  // Camera for desktop preview
+  // Desktop orbit camera. In tune mode it lets you orbit around to inspect.
+  // In view mode it just frames the splat once for preview.
   const camera = new BABYLON.ArcRotateCamera(
-    "cam", -Math.PI / 2, Math.PI / 2, 3,
-    new BABYLON.Vector3(0, 0, 0), scene
+    "cam", -Math.PI / 2, Math.PI / 2, 4,
+    new BABYLON.Vector3(0, 1, 0), scene
   );
   camera.attachControl(canvas, true);
   camera.wheelDeltaPercentage = 0.01;
   camera.minZ = 0.01;
   camera.maxZ = 1000;
 
-  // Load the gaussian splat
-  status.textContent = "Loading splat (6.9 MB)...";
-  const splat = new BABYLON.GaussianSplattingMesh("splat", null, scene);
+  status.textContent = "Loading splat...";
+  splat = new BABYLON.GaussianSplattingMesh("splat", null, scene);
   await splat.loadFileAsync("scene.ply");
-  status.textContent = "Splat loaded. " + splat.getTotalVertices().toLocaleString() + " gaussians.";
 
-  // Auto-frame the camera on the splat
+  applyTransform();
+
+  if (TUNE_MODE) {
+    setupTuneUI();
+    status.textContent = "TUNE MODE";
+  } else {
+    status.textContent = "";
+    setTimeout(() => { status.style.opacity = 0; }, 1000);
+  }
+
+  // Frame the camera on the splat at its current world position
+  splat.computeWorldMatrix(true);
   const bbox = splat.getBoundingInfo().boundingBox;
-  const center = bbox.centerWorld;
-  const extent = bbox.extendSizeWorld.length();
-  camera.target = center;
-  camera.radius = extent * 2.5;
+  camera.target = bbox.centerWorld.clone();
+  camera.radius = Math.max(2, bbox.extendSizeWorld.length() * 2.5);
 
-  // Set up WebXR
+  // WebXR
   try {
     const xrHelper = await scene.createDefaultXRExperienceAsync({
       uiOptions: { sessionMode: "immersive-vr", referenceSpaceType: "local-floor" },
@@ -64,24 +200,19 @@ async function createScene() {
 
     if (xrHelper.baseExperience) {
       vrbtn.disabled = false;
-      vrbtn.textContent = "Enter VR";
       vrbtn.addEventListener("click", async () => {
         try {
-          await xrHelper.baseExperience.enterXRAsync(
-            "immersive-vr", "local-floor"
-          );
+          await xrHelper.baseExperience.enterXRAsync("immersive-vr", "local-floor");
         } catch (e) {
+          status.style.opacity = 1;
           status.textContent = "VR error: " + e.message;
         }
       });
 
       xrHelper.baseExperience.onStateChangedObservable.add((state) => {
         if (state === BABYLON.WebXRState.IN_XR) {
-          status.textContent = "In VR — look around";
-          // Position the splat ~1.5m in front of the user at chest height
-          splat.position = new BABYLON.Vector3(0, 1.0, 1.5);
-        } else if (state === BABYLON.WebXRState.NOT_IN_XR) {
-          splat.position = new BABYLON.Vector3(0, 0, 0);
+          // Splat already at TRANSFORM — no repositioning so the user always
+          // sees their loved one in the exact same place.
         }
       });
     } else {
@@ -98,6 +229,7 @@ async function createScene() {
 createScene().then((scene) => {
   engine.runRenderLoop(() => scene.render());
 }).catch((e) => {
+  status.style.opacity = 1;
   status.textContent = "Error: " + e.message;
   console.error(e);
 });
