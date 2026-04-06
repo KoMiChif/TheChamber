@@ -108,6 +108,80 @@ function applyTransform() {
   splat.scaling.set(TRANSFORM.scale, TRANSFORM.scale, TRANSFORM.scale);
 }
 
+// Build reference geometry for tune mode: floor grid, axes, user stand-in.
+// All under one parent so it's easy to toggle/remove later if needed.
+function buildTuneScene(scene) {
+  const refs = new BABYLON.TransformNode("tune-refs", scene);
+
+  // ----- Floor grid (10x10m, 1m subdivisions) -----
+  const ground = BABYLON.MeshBuilder.CreateGround(
+    "tune-ground", { width: 10, height: 10, subdivisions: 10 }, scene
+  );
+  ground.parent = refs;
+  const gridMat = new BABYLON.StandardMaterial("tune-grid-mat", scene);
+  gridMat.wireframe = true;
+  gridMat.emissiveColor = new BABYLON.Color3(0.25, 0.35, 0.5);
+  gridMat.disableLighting = true;
+  ground.material = gridMat;
+
+  // A second, finer grid (0.1m) just inside a 2x2m central area for precision
+  const fine = BABYLON.MeshBuilder.CreateGround(
+    "tune-ground-fine", { width: 2, height: 2, subdivisions: 20 }, scene
+  );
+  fine.parent = refs;
+  fine.position.y = 0.001;
+  const fineMat = new BABYLON.StandardMaterial("tune-fine-mat", scene);
+  fineMat.wireframe = true;
+  fineMat.emissiveColor = new BABYLON.Color3(0.15, 0.2, 0.3);
+  fineMat.disableLighting = true;
+  fine.material = fineMat;
+
+  // ----- World-origin axis gizmo (X red, Y green, Z blue), 1m each -----
+  function axisLine(name, dir, color) {
+    const line = BABYLON.MeshBuilder.CreateLines(name, {
+      points: [BABYLON.Vector3.Zero(), dir.scale(1.0)],
+    }, scene);
+    line.color = color;
+    line.parent = refs;
+    return line;
+  }
+  axisLine("ax-x", new BABYLON.Vector3(1, 0, 0), new BABYLON.Color3(1, 0.3, 0.3));
+  axisLine("ax-y", new BABYLON.Vector3(0, 1, 0), new BABYLON.Color3(0.3, 1, 0.3));
+  axisLine("ax-z", new BABYLON.Vector3(0, 0, 1), new BABYLON.Color3(0.4, 0.6, 1));
+
+  // ----- User stand-in: 0.4m disc on the floor + cube at eye height (1.6m) -----
+  const standDisc = BABYLON.MeshBuilder.CreateDisc(
+    "tune-stand", { radius: 0.4, tessellation: 32 }, scene
+  );
+  standDisc.parent = refs;
+  standDisc.rotation.x = Math.PI / 2;
+  standDisc.position.y = 0.002;
+  const standMat = new BABYLON.StandardMaterial("tune-stand-mat", scene);
+  standMat.emissiveColor = new BABYLON.Color3(0.5, 0.4, 0.1);
+  standMat.disableLighting = true;
+  standMat.alpha = 0.5;
+  standDisc.material = standMat;
+
+  // Eye-height marker (small cube at 1.6m)
+  const eye = BABYLON.MeshBuilder.CreateBox("tune-eye", { size: 0.08 }, scene);
+  eye.parent = refs;
+  eye.position.y = 1.6;
+  const eyeMat = new BABYLON.StandardMaterial("tune-eye-mat", scene);
+  eyeMat.emissiveColor = new BABYLON.Color3(0.8, 0.6, 0.2);
+  eyeMat.disableLighting = true;
+  eye.material = eyeMat;
+
+  // Vertical "spine" line from floor to eye marker, so the user's standing
+  // axis is obvious in VR
+  const spine = BABYLON.MeshBuilder.CreateLines("tune-spine", {
+    points: [new BABYLON.Vector3(0, 0, 0), new BABYLON.Vector3(0, 1.6, 0)],
+  }, scene);
+  spine.color = new BABYLON.Color3(0.6, 0.5, 0.2);
+  spine.parent = refs;
+
+  return refs;
+}
+
 function setupTuneUI() {
   tunePanel.classList.remove("hidden");
 
@@ -178,6 +252,7 @@ async function createScene() {
   applyTransform();
 
   if (TUNE_MODE) {
+    buildTuneScene(scene);
     setupTuneUI();
     status.textContent = "TUNE MODE";
   } else {
