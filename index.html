@@ -46,11 +46,11 @@
 <div id="tune-panel" class="hidden">
   <h3>TUNE MODE</h3>
   <label>Position X <span class="val" id="px-v">0.00</span></label>
-  <input type="range" id="px" min="-3" max="3" step="0.01">
+  <input type="range" id="px" min="-5" max="5" step="0.01">
   <label>Position Y <span class="val" id="py-v">0.00</span></label>
-  <input type="range" id="py" min="-1" max="3" step="0.01">
+  <input type="range" id="py" min="-2" max="5" step="0.01">
   <label>Position Z <span class="val" id="pz-v">0.00</span></label>
-  <input type="range" id="pz" min="-3" max="3" step="0.01">
+  <input type="range" id="pz" min="-5" max="5" step="0.01">
   <label>Rotation X <span class="val" id="rx-v">0.00</span></label>
   <input type="range" id="rx" min="-3.14159" max="3.14159" step="0.01">
   <label>Rotation Y <span class="val" id="ry-v">0.00</span></label>
@@ -58,7 +58,7 @@
   <label>Rotation Z <span class="val" id="rz-v">0.00</span></label>
   <input type="range" id="rz" min="-3.14159" max="3.14159" step="0.01">
   <label>Scale <span class="val" id="sc-v">1.00</span></label>
-  <input type="range" id="sc" min="0.1" max="3" step="0.01">
+  <input type="range" id="sc" min="0.1" max="5" step="0.01">
   <div class="actions">
     <button id="reset">Reset</button>
     <button id="copy">Copy</button>
@@ -237,16 +237,26 @@ async function createScene() {
   const scene = new BABYLON.Scene(engine);
   scene.clearColor = new BABYLON.Color4(0, 0, 0, 1);
 
-  // Desktop orbit camera. In tune mode it lets you orbit around to inspect.
-  // In view mode it just frames the splat once for preview.
+  // Desktop camera = simulated VR eye position. User stands at origin with
+  // eyes at 1.6 m, looking toward +Z. This way the desktop preview matches
+  // what the splat will look like in VR, so there's no scaling/height
+  // surprise when putting on the headset. In tune mode the user can still
+  // orbit to inspect — target is at (0, 1.6, 0).
   const camera = new BABYLON.ArcRotateCamera(
-    "cam", -Math.PI / 2, Math.PI / 2, 4,
-    new BABYLON.Vector3(0, 1, 0), scene
+    "cam",
+    Math.PI / 2,       // alpha: looking toward +Z
+    Math.PI / 2,       // beta: horizontal (no pitch)
+    0.001,             // radius: essentially at the target
+    new BABYLON.Vector3(0, 1.6, 0),
+    scene
   );
   camera.attachControl(canvas, true);
   camera.wheelDeltaPercentage = 0.01;
   camera.minZ = 0.01;
   camera.maxZ = 1000;
+  // Let the user orbit around with mouse in tune mode; disable in view mode
+  // so nothing feels manipulable.
+  if (!TUNE_MODE) camera.detachControl();
 
   status.textContent = "Loading splat...";
   splat = new BABYLON.GaussianSplattingMesh("splat", null, scene);
@@ -264,11 +274,8 @@ async function createScene() {
     setTimeout(() => { status.style.opacity = 0; }, 1000);
   }
 
-  // Frame the camera on the splat at its current world position
-  splat.computeWorldMatrix(true);
-  const bbox = splat.getBoundingInfo().boundingBox;
-  camera.target = bbox.centerWorld.clone();
-  camera.radius = Math.max(2, bbox.extendSizeWorld.length() * 2.5);
+  // NOTE: no auto-framing — camera stays at simulated VR eye position so
+  // what you see on desktop is what you'll see in VR.
 
   // WebXR
   try {
