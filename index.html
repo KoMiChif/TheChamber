@@ -101,10 +101,19 @@ const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, s
 
 let splat = null;
 
+// SHARP outputs in OpenCV convention (Y-down, Z-forward). Babylon is Y-up.
+// Flip 180° around X to align. This is applied as a baseline so the user's
+// rotX slider stays centered at 0 for "right side up".
+const COORD_FIX_ROT_X = Math.PI;
+
 function applyTransform() {
   if (!splat) return;
   splat.position.set(TRANSFORM.posX, TRANSFORM.posY, TRANSFORM.posZ);
-  splat.rotation.set(TRANSFORM.rotX, TRANSFORM.rotY, TRANSFORM.rotZ);
+  splat.rotation.set(
+    TRANSFORM.rotX + COORD_FIX_ROT_X,
+    TRANSFORM.rotY,
+    TRANSFORM.rotZ
+  );
   splat.scaling.set(TRANSFORM.scale, TRANSFORM.scale, TRANSFORM.scale);
 }
 
