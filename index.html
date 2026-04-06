@@ -101,20 +101,14 @@ const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, s
 
 let splat = null;
 
-// SHARP outputs in OpenCV convention (X right, Y DOWN, Z forward). Babylon
-// is left-handed Y-up. Pure rotation can't fix this without also flipping Z
-// (which would put the back of the head toward the viewer). Instead we mirror
-// the Y axis via a negative scale, which flips just Y while leaving the
-// face-toward-camera orientation intact.
+// scene.ply has already been flipped to Y-up at the data level (see
+// flip_ply_y.py). No viewer-side coordinate correction needed — all sliders
+// act directly on the splat.
 function applyTransform() {
   if (!splat) return;
   splat.position.set(TRANSFORM.posX, TRANSFORM.posY, TRANSFORM.posZ);
   splat.rotation.set(TRANSFORM.rotX, TRANSFORM.rotY, TRANSFORM.rotZ);
-  splat.scaling.set(
-    TRANSFORM.scale,
-    -TRANSFORM.scale,  // negative Y = mirror to fix OpenCV Y-down
-    TRANSFORM.scale
-  );
+  splat.scaling.set(TRANSFORM.scale, TRANSFORM.scale, TRANSFORM.scale);
 }
 
 // Build reference geometry for tune mode: floor grid, axes, user stand-in.
