@@ -250,7 +250,8 @@ async function createScene() {
 
   status.textContent = "Loading splat...";
   splat = new BABYLON.GaussianSplattingMesh("splat", null, scene);
-  await splat.loadFileAsync("scene.ply");
+  // Cache-busting version — bump when scene.ply changes
+  await splat.loadFileAsync("scene.ply?v=3");
 
   applyTransform();
 
