@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SHARP Splat Viewer</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #000; color: #fff;
+               font-family: -apple-system, system-ui, sans-serif; }
+  #renderCanvas { width: 100vw; height: 100vh; display: block; outline: none; touch-action: none; }
+  #status { position: fixed; left: 12px; top: 12px; padding: 8px 12px;
+            background: rgba(0,0,0,0.6); border-radius: 6px; font-size: 14px; pointer-events: none; }
+  #vrbtn { position: fixed; right: 12px; bottom: 12px; padding: 12px 20px;
+           background: #3b82f6; color: #fff; border: 0; border-radius: 8px;
+           font-size: 16px; cursor: pointer; }
+  #vrbtn:disabled { background: #555; cursor: not-allowed; }
+</style>
+<script src="https://cdn.babylonjs.com/babylon.js"></script>
+<script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+</head>
+<body>
+<canvas id="renderCanvas"></canvas>
+<div id="status">Loading splat...</div>
+<button id="vrbtn" disabled>Enter VR</button>
+<script>
+const status = document.getElementById("status");
+const vrbtn = document.getElementById("vrbtn");
+const canvas = document.getElementById("renderCanvas");
+const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+
+async function createScene() {
+  const scene = new BABYLON.Scene(engine);
+  scene.clearColor = new BABYLON.Color4(0, 0, 0, 1);
+
+  // Camera for desktop preview
+  const camera = new BABYLON.ArcRotateCamera(
+    "cam", -Math.PI / 2, Math.PI / 2, 3,
+    new BABYLON.Vector3(0, 0, 0), scene
+  );
+  camera.attachControl(canvas, true);
+  camera.wheelDeltaPercentage = 0.01;
+  camera.minZ = 0.01;
+  camera.maxZ = 1000;
+
+  // Load the gaussian splat
+  status.textContent = "Loading splat (6.9 MB)...";
+  const splat = new BABYLON.GaussianSplattingMesh("splat", null, scene);
+  await splat.loadFileAsync("scene.ply");
+  status.textContent = "Splat loaded. " + splat.getTotalVertices().toLocaleString() + " gaussians.";
+
+  // Auto-frame the camera on the splat
+  const bbox = splat.getBoundingInfo().boundingBox;
+  const center = bbox.centerWorld;
+  const extent = bbox.extendSizeWorld.length();
+  camera.target = center;
+  camera.radius = extent * 2.5;
+
+  // Set up WebXR
+  try {
+    const xrHelper = await scene.createDefaultXRExperienceAsync({
+      uiOptions: { sessionMode: "immersive-vr", referenceSpaceType: "local-floor" },
+      disableDefaultUI: true,
+    });
+
+    if (xrHelper.baseExperience) {
+      vrbtn.disabled = false;
+      vrbtn.textContent = "Enter VR";
+      vrbtn.addEventListener("click", async () => {
+        try {
+          await xrHelper.baseExperience.enterXRAsync(
+            "immersive-vr", "local-floor"
+          );
+        } catch (e) {
+          status.textContent = "VR error: " + e.message;
+        }
+      });
+
+      xrHelper.baseExperience.onStateChangedObservable.add((state) => {
+        if (state === BABYLON.WebXRState.IN_XR) {
+          status.textContent = "In VR — look around";
+          // Position the splat ~1.5m in front of the user at chest height
+          splat.position = new BABYLON.Vector3(0, 1.0, 1.5);
+        } else if (state === BABYLON.WebXRState.NOT_IN_XR) {
+          splat.position = new BABYLON.Vector3(0, 0, 0);
+        }
+      });
+    } else {
+      vrbtn.textContent = "VR not supported";
+    }
+  } catch (e) {
+    vrbtn.textContent = "WebXR unavailable";
+    console.error("XR init error:", e);
+  }
+
+  return scene;
+}
+
+createScene().then((scene) => {
+  engine.runRenderLoop(() => scene.render());
+}).catch((e) => {
+  status.textContent = "Error: " + e.message;
+  console.error(e);
+});
+
+window.addEventListener("resize", () => engine.resize());
+</script>
+</body>
+</html>
